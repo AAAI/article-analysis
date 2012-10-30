@@ -1,0 +1,67 @@
+#!/bin/bash
+
+if [ "$1" != "" ]
+then
+    echo "$1" | grep -q '\.pdf$'
+    if [ $? -eq 0 ]
+    then
+        pdfs=$1
+        dir=`dirname $1`
+    else
+        pdfs=`ls $1/*.pdf`
+        dir=$1
+    fi
+else
+    pdfs=`ls *.pdf`
+    dir=`pwd`
+fi
+
+for pdf in $pdfs
+do
+    doc=`basename $pdf .pdf`
+
+    if grep -q FontName $dir/$doc.pdf
+    then
+        echo "Extracting with pdftotext on $doc.pdf..."
+        pdftotext $dir/$doc.pdf $doc.txt
+    fi
+
+    filesize=$(stat -c%s "$doc.txt" 2> /dev/null)
+    if [ "$filesize" -le "1000" ]
+    then
+        echo "Performing OCR on $doc.pdf..."
+
+        pdfimages $dir/$doc.pdf $doc
+
+        for image in `ls $doc-*[[:digit:]].ppm 2> /dev/null`
+        do
+            f=`basename $image .ppm`
+            convert $f.ppm $f.pbm
+            rm $f.ppm
+        done
+
+        # try using "unpaper" first
+        for image in `ls $doc-*[[:digit:]].pbm`
+        do
+            f=`basename $image .pbm`
+            unpaper $image $f-fixed.pbm
+            nice tesseract $f-fixed.pbm $f
+        done
+
+        cat $doc-*.txt > $doc.txt
+
+        # if that fails, try again without "unpaper"
+        filesize=$(stat -c%s "$doc.txt")
+        if [ "$filesize" -le "1000" ]
+        then
+            for image in `ls $doc-*[[:digit:]].pbm`
+            do
+                f=`basename $image .pbm`
+                echo "OCR on $f.pbm"
+                nice tesseract $f.pbm $f
+            done
+        fi
+
+        rm $doc-*.pbm $doc-*.txt
+    fi
+done
